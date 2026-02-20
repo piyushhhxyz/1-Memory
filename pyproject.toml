@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "onememory"
+version = "0.1.0"
+description = "Brain-inspired local AI memory system"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "mcp[cli]>=1.0.0",
+    "typer[all]>=0.12.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+onememory = "onememory.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/onememory"]
