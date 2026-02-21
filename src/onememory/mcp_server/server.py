@@ -74,8 +74,15 @@ def get_recent_conversations(limit: int = 5) -> str:
     return "\n".join(lines)
 
 
-def main():
-    mcp.run()
+def main(transport: str = "stdio", port: int = 8765):
+    if transport == "sse":
+        from mcp.server.transport_security import TransportSecuritySettings
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.port = port
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        )
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

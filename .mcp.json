@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "onememory": {
+      "command": "/Users/piyush100x/Desktop/onememory/.venv/bin/python",
+      "args": ["-c", "from onememory.mcp_server.server import main; main()"],
+      "env": {
+        "ANONYMIZED_TELEMETRY": "False",
+        "HTTP_PROXY": "",
+        "HTTPS_PROXY": "",
+        "http_proxy": "",
+        "https_proxy": ""
+      }
+    }
+  }
+}
