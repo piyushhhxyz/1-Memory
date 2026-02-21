@@ -116,47 +116,51 @@ The MCP server exposes your memories to Claude Code. Ask Claude "what do you kno
 
 ## Quick Start
 
-### 1. Install
+### Setup (one time)
 
 ```bash
 cd onememory
-python3.12 -m venv .venv
-source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e .
 brew install mitmproxy
 onememory init
-```
-
-### 2. Set Up Proxy (one time)
-
-```bash
-# Set system proxy
-networksetup -setwebproxy "Wi-Fi" localhost 8080
-networksetup -setsecurewebproxy "Wi-Fi" localhost 8080
-
-# Start the interceptor
-onememory start
-
-# Install CA cert (with proxy running, visit http://mitm.it — or run):
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.mitmproxy/mitmproxy-ca-cert.pem
 ```
 
-### 3. Chat on ChatGPT
+### Start Capturing
 
-Open chatgpt.com and have a conversation. You'll see in the terminal:
+```bash
+source .venv/bin/activate
+networksetup -setwebproxy "Wi-Fi" localhost 8080
+networksetup -setsecurewebproxy "Wi-Fi" localhost 8080
+onememory start
+```
+
+Open chatgpt.com and chat. You'll see in the terminal:
 ```
 [OneMemory] Captured (gpt-5-2): My name is Piyush and I love Python
 [OneMemory] Reply: Nice to meet you Piyush!
 [OneMemory] Saved: ~/.onememory/hippocampus/2026-02-21/073721.json
 ```
 
-### 4. Consolidate
+### Stop Capturing
 
 ```bash
-onememory dream
+networksetup -setwebproxystate "Wi-Fi" off
+networksetup -setsecurewebproxystate "Wi-Fi" off
+kill $(lsof -ti :8080)
 ```
 
-### 5. Connect Claude Code
+### Daily Use
+
+```bash
+onememory recent              # see captured conversations
+onememory dream               # consolidate into memories
+onememory status              # memory stats
+onememory search "python"     # search memories
+```
+
+### Connect Claude Code
 
 ```bash
 claude mcp add onememory -- bash -c "cd $(pwd) && source .venv/bin/activate && onememory mcp-serve"
@@ -164,12 +168,82 @@ claude mcp add onememory -- bash -c "cd $(pwd) && source .venv/bin/activate && o
 
 Ask Claude: **"What do you know about me?"**
 
-### 6. Turn Off Proxy When Done
+### If It Breaks
 
 ```bash
-networksetup -setwebproxystate "Wi-Fi" off
-networksetup -setsecurewebproxystate "Wi-Fi" off
+kill $(lsof -ti :8080)       # kill stale process
+onememory start               # restart fresh
 ```
+
+---
+
+## Troubleshooting
+
+If the interceptor stops capturing conversations (or captures user messages but misses assistant replies), run through this checklist:
+
+### 1. Is mitmdump running?
+
+```bash
+lsof -i :8080
+```
+
+If nothing shows up, start it:
+
+```bash
+onememory start
+```
+
+If something **other** than `mitmdump` is using port 8080, kill it first:
+
+```bash
+kill $(lsof -ti :8080)
+onememory start
+```
+
+### 2. Is the system proxy ON?
+
+```bash
+networksetup -getwebproxy "Wi-Fi"
+networksetup -getsecurewebproxy "Wi-Fi"
+```
+
+Both should show `Enabled: Yes`, `Server: localhost`, `Port: 8080`. If not:
+
+```bash
+networksetup -setwebproxy "Wi-Fi" localhost 8080
+networksetup -setsecurewebproxy "Wi-Fi" localhost 8080
+```
+
+### 3. Is the mitmproxy CA certificate trusted?
+
+```bash
+security verify-cert -c ~/.mitmproxy/mitmproxy-ca-cert.pem -p ssl
+```
+
+Should say `certificate verification successful`. If not:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.mitmproxy/mitmproxy-ca-cert.pem
+```
+
+### 4. Stale process? Restart it
+
+If mitmdump has been running for a long time and stops capturing properly, just restart it:
+
+```bash
+kill $(lsof -ti :8080)
+onememory start
+```
+
+### 5. Debug mode
+
+Run without `--quiet` to see all traffic and errors in real time:
+
+```bash
+mitmdump -p 8080 -s src/onememory/interceptor/addon.py
+```
+
+You should see `[OneMemory] Captured (...)` lines when you chat on ChatGPT.
 
 ---
 
