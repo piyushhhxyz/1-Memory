@@ -41,5 +41,11 @@ class SearchResult(BaseModel):
     score: float
 
 
+class DailyLog(BaseModel):
+    date: str
+    metadata: dict = Field(default_factory=lambda: {"agent": "chatgpt", "source": "chatgpt-web", "provider": "openai"})
+    conversations: list[Conversation] = Field(default_factory=list)
+
+
 class HippocampusIndex(BaseModel):
     conversations: dict[str, str] = Field(default_factory=dict)

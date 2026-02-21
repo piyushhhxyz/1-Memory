@@ -140,7 +140,7 @@ Open chatgpt.com and chat. You'll see in the terminal:
 ```
 [OneMemory] Captured (gpt-5-2): My name is Piyush and I love Python
 [OneMemory] Reply: Nice to meet you Piyush!
-[OneMemory] Saved: ~/.onememory/hippocampus/2026-02-21/073721.json
+[OneMemory] Saved: ~/.onememory/hippocampus/2026-02-21.json
 ```
 
 ### Stop Capturing
@@ -158,6 +158,13 @@ onememory recent              # see captured conversations
 onememory dream               # consolidate into memories
 onememory status              # memory stats
 onememory search "python"     # search memories
+```
+
+### View Logs
+
+```bash
+cat ~/.onememory/hippocampus/2026-02-21.json    # today's full log
+ls ~/.onememory/hippocampus/*.json               # all daily logs
 ```
 
 ### Connect Claude Code
@@ -295,8 +302,8 @@ Everything is JSON in `~/.onememory/`. No SQLite, no Postgres, no vector stores.
 ```
 ~/.onememory/
 ├── hippocampus/           # Raw captured conversations
-│   ├── index.json         # Conversation index
-│   └── 2026-02-21/        # Today's conversations
+│   ├── 2026-02-21.json    # One file per day (all conversations)
+│   └── 2026-02-20.json
 ├── cortex/                # Consolidated memories
 │   └── knowledge/         # Facts and knowledge
 ├── amygdala/

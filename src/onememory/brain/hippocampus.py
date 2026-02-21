@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from onememory.config import Config
-from onememory.models import Conversation, HippocampusIndex
+from onememory.models import Conversation, DailyLog
 from onememory.brain.repository import FileStore
 
 
@@ -15,30 +15,23 @@ class Hippocampus:
         self.store = FileStore()
         self._on_capture_callbacks: list = []
 
-    @property
-    def _index_path(self) -> Path:
-        return self.config.hippocampus_dir / "index.json"
-
-    def _load_index(self) -> HippocampusIndex:
-        if self._index_path.exists():
-            return HippocampusIndex.model_validate_json(self._index_path.read_text())
-        return HippocampusIndex()
-
-    def _save_index(self, index: HippocampusIndex) -> None:
-        self.store.save(self._index_path, index)
-
-    def _today_dir(self) -> Path:
+    def _today_file(self) -> Path:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        d = self.config.hippocampus_dir / today
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return self.config.hippocampus_dir / f"{today}.json"
+
+    def _load_daily(self, path: Path) -> DailyLog:
+        if path.exists():
+            return DailyLog.model_validate_json(path.read_text())
+        return DailyLog(date=path.stem)
+
+    def _save_daily(self, path: Path, log: DailyLog) -> None:
+        self.store.save(path, log)
 
     def capture(self, conversation: Conversation) -> str:
-        filepath = self._today_dir() / f"{conversation.id}.json"
-        self.store.save(filepath, conversation)
-        index = self._load_index()
-        index.conversations[conversation.id] = str(filepath)
-        self._save_index(index)
+        path = self._today_file()
+        log = self._load_daily(path)
+        log.conversations.append(conversation)
+        self._save_daily(path, log)
         for cb in self._on_capture_callbacks:
             try:
                 cb(conversation)
@@ -47,33 +40,36 @@ class Hippocampus:
         return conversation.id
 
     def get(self, conversation_id: str) -> Conversation | None:
-        index = self._load_index()
-        filepath = index.conversations.get(conversation_id)
-        if filepath and Path(filepath).exists():
-            return Conversation.model_validate_json(Path(filepath).read_text())
+        for path in sorted(self.config.hippocampus_dir.glob("????-??-??.json"), reverse=True):
+            log = self._load_daily(path)
+            for c in log.conversations:
+                if c.id == conversation_id:
+                    return c
         return None
 
     def get_recent(self, limit: int = 20) -> list[Conversation]:
-        index = self._load_index()
-        results = []
-        for cid in list(index.conversations.keys())[-limit:]:
-            c = self.get(cid)
-            if c:
+        results: list[Conversation] = []
+        for path in sorted(self.config.hippocampus_dir.glob("????-??-??.json"), reverse=True):
+            log = self._load_daily(path)
+            for c in reversed(log.conversations):
                 results.append(c)
+                if len(results) >= limit:
+                    return results
         return results
 
     def get_all_today(self) -> list[Conversation]:
-        results = []
-        for f in sorted(self._today_dir().glob("*.json")):
-            try:
-                results.append(Conversation.model_validate_json(f.read_text()))
-            except Exception:
-                pass
-        return results
+        return self._load_daily(self._today_file()).conversations
 
     def on_capture(self, callback) -> None:
         """Observer pattern — register a callback for new captures."""
         self._on_capture_callbacks.append(callback)
 
     def count(self) -> int:
-        return len(self._load_index().conversations)
+        total = 0
+        for path in self.config.hippocampus_dir.glob("????-??-??.json"):
+            try:
+                log = self._load_daily(path)
+                total += len(log.conversations)
+            except Exception:
+                pass
+        return total

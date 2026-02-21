@@ -110,36 +110,42 @@ def _extract_assistant_response(raw: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def _save_conversation(user_message: str, assistant_message: str, model: str) -> Path:
-    """Write a conversation JSON to hippocampus and update the index."""
-    conv_id = datetime.now(timezone.utc).strftime("%H%M%S%f")[:12]
+    """Append a conversation to today's daily log file."""
+    now = datetime.now(timezone.utc)
+    conv_id = now.strftime("%H%M%S%f")[:12]
+
     conversation = {
         "id": conv_id,
-        "provider": "openai",
         "model": model or "chatgpt",
         "messages": [],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "metadata": {"source": "chatgpt-web"},
+        "timestamp": now.isoformat(),
     }
     if user_message:
         conversation["messages"].append({"role": "user", "content": user_message})
     if assistant_message:
         conversation["messages"].append({"role": "assistant", "content": assistant_message})
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    today_dir = HIPPOCAMPUS_DIR / today
-    today_dir.mkdir(parents=True, exist_ok=True)
-    filepath = today_dir / f"{conv_id}.json"
-    filepath.write_text(json.dumps(conversation, indent=2))
+    today = now.strftime("%Y-%m-%d")
+    filepath = HIPPOCAMPUS_DIR / f"{today}.json"
 
-    index_path = HIPPOCAMPUS_DIR / "index.json"
-    index = {"conversations": {}}
-    if index_path.exists():
+    # Load existing daily log or create new one
+    if filepath.exists():
         try:
-            index = json.loads(index_path.read_text())
+            daily_log = json.loads(filepath.read_text())
         except Exception:
-            pass
-    index["conversations"][conv_id] = str(filepath)
-    index_path.write_text(json.dumps(index, indent=2))
+            daily_log = None
+    else:
+        daily_log = None
+
+    if not daily_log:
+        daily_log = {
+            "date": today,
+            "metadata": {"agent": "chatgpt", "source": "chatgpt-web", "provider": "openai"},
+            "conversations": [],
+        }
+
+    daily_log["conversations"].append(conversation)
+    filepath.write_text(json.dumps(daily_log, indent=2))
 
     return filepath
 
@@ -161,12 +167,23 @@ class OneMemoryAddon:
         if "chatgpt.com" not in flow.request.pretty_host:
             flow.request.is_replay = True
 
+    def request(self, flow: http.HTTPFlow) -> None:
+        if "chatgpt.com" not in flow.request.pretty_host:
+            return
+        path = flow.request.path.split("?")[0].rstrip("/")
+        print(f"[OneMemory] → {flow.request.method} {path}")
+
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         """Buffer full SSE response instead of streaming through."""
         if _is_chatgpt_conversation(flow):
             flow.response.stream = False
 
     def response(self, flow: http.HTTPFlow) -> None:
+        if "chatgpt.com" in flow.request.pretty_host:
+            path = flow.request.path.split("?")[0].rstrip("/")
+            status = flow.response.status_code
+            print(f"[OneMemory] ← {status} {flow.request.method} {path}")
+
         if not _is_chatgpt_conversation(flow):
             return
 
