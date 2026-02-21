@@ -4,7 +4,7 @@
 
 You tell ChatGPT your name, your preferences, what you're working on. Then you open Claude — blank slate. Switch to Gemini — blank slate. Every AI has amnesia. Your context, your identity, scattered across a dozen apps that will never talk to each other.
 
-OneMemory fixes this. It intercepts your ChatGPT conversations at the network level, consolidates them into structured memories, and serves them to Claude via MCP. **Your brain, portable across every AI.**
+OneMemory fixes this. It intercepts your ChatGPT conversations at the network level, **automatically** consolidates them into structured memories, and serves them to Claude via MCP. **Your brain, portable across every AI.**
 
 ---
 
@@ -40,32 +40,12 @@ We modeled OneMemory after how the human brain actually handles memory:
 | Brain Region | Function | OneMemory Equivalent |
 |-------------|----------|---------------------|
 | **Hippocampus** | Fast capture of new experiences | Raw conversation capture in `hippocampus/` |
-| **Cortex** | Long-term semantic storage | Consolidated memories in `cortex/` |
+| **Cortex** | Long-term semantic storage | Consolidated memories in `cortex/` (vector search via ChromaDB) |
 | **Amygdala** | Emotional salience / importance | Importance scoring via keyword heuristics |
 | **Prefrontal Cortex** | Executive retrieval & orchestration | Query facade that ties everything together |
-| **Sleep consolidation** | Transfers hippocampus → cortex | `onememory dream` command |
+| **Auto-consolidation** | Real-time hippocampus → cortex transfer | Happens instantly on capture — no manual step needed |
 
-This isn't just a cute metaphor — it's the actual code architecture. Fast capture, importance scoring, consolidation during "sleep", and orchestrated retrieval. Just like your brain.
-
-### The Hippocampal-Cortical Memory System
-
-The human memory system has a two-stage architecture (McClelland et al., 1995):
-
-1. **Hippocampus** — fast, episodic recording of raw experiences
-2. **Neocortex** — slow, semantic consolidation into structured knowledge
-
-The transfer happens during **sleep** — your brain replays the day's experiences and extracts patterns. This is why "sleeping on it" helps you learn.
-
-OneMemory mirrors this:
-- `hippocampus/` = fast, raw conversation capture
-- `cortex/` = consolidated, structured memories
-- `onememory dream` = the "sleep" that transfers from one to the other
-
-### The Amygdala: Not Everything Matters Equally
-
-Your brain doesn't store every experience with equal weight. The amygdala tags experiences with emotional significance.
-
-OneMemory's amygdala scores conversations by salience: mentions of identity ("my name is"), preferences ("I prefer"), strong opinions ("I love/hate") get higher scores. Low-salience chatter gets deprioritized during consolidation.
+This isn't just a cute metaphor — it's the actual code architecture. Fast capture, importance scoring, instant consolidation, and orchestrated retrieval. Just like your brain.
 
 ---
 
@@ -84,15 +64,15 @@ OneMemory's amygdala scores conversations by salience: mentions of identity ("my
         ┌───────────────────────┐
         │     Hippocampus       │  raw JSON in ~/.onememory/hippocampus/
         └───────────┬───────────┘
-                    │ onememory dream
+                    │ auto-consolidation (instant, no manual step)
                     ▼
         ┌───────────────────────┐
-        │   Amygdala → Cortex   │  scored + structured in ~/.onememory/cortex/
+        │   Amygdala → Cortex   │  scored + vectorized in ~/.onememory/cortex/
         └───────────┬───────────┘
                     │
                     ▼
         ┌───────────────────────┐
-        │     MCP Server        │  Claude Code reads your memories
+        │     MCP Server        │  Claude reads your memories via recall()
         └───────────────────────┘
 ```
 
@@ -100,17 +80,13 @@ OneMemory's amygdala scores conversations by salience: mentions of identity ("my
 
 A local mitmproxy instance intercepts ChatGPT's `backend-anon/f/conversation` endpoint. Our addon parses the v1 delta-encoded SSE stream — collecting text append patches to reconstruct both the user's message and the assistant's full reply. Everything stays local.
 
-### Step 2: Store & Score
+### Step 2: Store, Score & Consolidate (automatic)
 
-Conversations land in `~/.onememory/hippocampus/` as raw JSON files, indexed for fast lookup. The Amygdala scores each conversation's importance based on personal information signals.
+Conversations land in `~/.onememory/hippocampus/` as raw JSON files. **Immediately** after capture, the addon extracts facts (identity, preferences, knowledge) and stores them in the Cortex with deterministic content-based IDs — same content always gets the same ID, so duplicates are impossible.
 
-### Step 3: Consolidate
+### Step 3: Recall
 
-`onememory dream` runs sleep consolidation — it reads today's conversations, extracts structured facts (identity, preferences, knowledge), and stores them in the Cortex.
-
-### Step 4: Recall
-
-The MCP server exposes your memories to Claude Code. Ask Claude "what do you know about me?" — it returns your full context.
+The MCP server exposes a single `recall()` tool to Claude. It returns your full context — identity, preferences, knowledge, recent activity. Add a query to get semantic search results.
 
 ---
 
@@ -127,44 +103,27 @@ onememory init
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.mitmproxy/mitmproxy-ca-cert.pem
 ```
 
-### Start Capturing
+### Start Everything (one command)
 
 ```bash
+# Terminal 1: Start proxy + MCP server
 source .venv/bin/activate
 networksetup -setwebproxy "Wi-Fi" localhost 8080
 networksetup -setsecurewebproxy "Wi-Fi" localhost 8080
-onememory start
+onememory up
+
+# Terminal 2: Expose MCP to claude.com
+ngrok http 8765
 ```
 
-Open chatgpt.com and chat. You'll see in the terminal:
-```
-[OneMemory] Captured (gpt-5-2): My name is Piyush and I love Python
-[OneMemory] Reply: Nice to meet you Piyush!
-[OneMemory] Saved: ~/.onememory/hippocampus/2026-02-21.json
-```
+That's it. Chat on chatgpt.com — memories appear instantly. No `dream` step needed.
 
-### Stop Capturing
+### Stop
 
 ```bash
+# Ctrl+C in Terminal 1 (stops both proxy and MCP server)
 networksetup -setwebproxystate "Wi-Fi" off
 networksetup -setsecurewebproxystate "Wi-Fi" off
-kill $(lsof -ti :8080)
-```
-
-### Daily Use
-
-```bash
-onememory recent              # see captured conversations
-onememory dream               # consolidate into memories
-onememory status              # memory stats
-onememory search "python"     # search memories
-```
-
-### View Logs
-
-```bash
-cat ~/.onememory/hippocampus/2026-02-21.json    # today's full log
-ls ~/.onememory/hippocampus/*.json               # all daily logs
 ```
 
 ### Connect Claude Code
@@ -175,36 +134,74 @@ claude mcp add onememory -- bash -c "cd $(pwd) && source .venv/bin/activate && o
 
 Ask Claude: **"What do you know about me?"**
 
-### If It Breaks
+### Connect claude.com
 
-```bash
-kill $(lsof -ti :8080)       # kill stale process
-onememory start               # restart fresh
-```
+1. Copy the ngrok URL from Terminal 2
+2. claude.com → Settings → Integrations → Add MCP → paste the URL
+
+---
+
+## CLI Commands
+
+### Run
+
+| Command | What it does |
+|---------|-------------|
+| `onememory up` | **Start everything** — proxy interceptor + MCP server |
+| `onememory init` | Create `~/.onememory/` directory structure |
+| `onememory start` | Start mitmproxy interceptor only |
+| `onememory mcp-serve` | Start MCP server only (stdio for Claude Code) |
+| `onememory mcp-serve --http` | Start MCP server only (SSE for claude.com) |
+
+### Inspect
+
+| Command | What it does |
+|---------|-------------|
+| `onememory memories` | List all stored memories in a table |
+| `onememory memories identity` | Filter by category (`identity`, `preference`, `knowledge`) |
+| `onememory context` | Show exactly what Claude sees when it calls `recall()` |
+| `onememory search "query"` | Semantic search across your memories |
+| `onememory recent` | Show recently captured conversations |
+| `onememory status` | Show memory stats (counts) |
+
+### Manage
+
+| Command | What it does |
+|---------|-------------|
+| `onememory remember "text"` | Manually store a memory |
+| `onememory clear` | Clear today's captured conversations |
+| `onememory reset --memories` | Clear all memories (cortex) only, keep conversations |
+| `onememory reset` | **Nuke everything** — conversations + memories + scores |
+| `onememory reset --yes` | Skip confirmation |
+| `onememory dream` | *(deprecated)* One-time migration of old conversations |
+
+## MCP Tools (for Claude)
+
+Claude is instructed to **always call `recall()` first** at the start of every conversation to load your full context, and address you by name.
+
+| Tool | What it does |
+|------|-------------|
+| `recall()` | Full user context — identity, preferences, knowledge, recent activity, stats |
+| `recall(query="...")` | Full context + semantic search results matching the query |
+| `remember(content, category)` | Store a new memory about the user |
 
 ---
 
 ## Troubleshooting
 
-If the interceptor stops capturing conversations (or captures user messages but misses assistant replies), run through this checklist:
+If the interceptor stops capturing conversations, run through this checklist:
 
-### 1. Is mitmdump running?
+### 1. Is everything running?
 
 ```bash
-lsof -i :8080
+lsof -i :8080   # proxy
+lsof -i :8765   # MCP server
 ```
 
-If nothing shows up, start it:
+If not, restart:
 
 ```bash
-onememory start
-```
-
-If something **other** than `mitmdump` is using port 8080, kill it first:
-
-```bash
-kill $(lsof -ti :8080)
-onememory start
+onememory up
 ```
 
 ### 2. Is the system proxy ON?
@@ -233,16 +230,7 @@ Should say `certificate verification successful`. If not:
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.mitmproxy/mitmproxy-ca-cert.pem
 ```
 
-### 4. Stale process? Restart it
-
-If mitmdump has been running for a long time and stops capturing properly, just restart it:
-
-```bash
-kill $(lsof -ti :8080)
-onememory start
-```
-
-### 5. Debug mode
+### 4. Debug mode
 
 Run without `--quiet` to see all traffic and errors in real time:
 
@@ -250,33 +238,7 @@ Run without `--quiet` to see all traffic and errors in real time:
 mitmdump -p 8080 -s src/onememory/interceptor/addon.py
 ```
 
-You should see `[OneMemory] Captured (...)` lines when you chat on ChatGPT.
-
----
-
-## CLI Commands
-
-| Command | What it does |
-|---------|-------------|
-| `onememory init` | Create `~/.onememory/` directory structure |
-| `onememory start` | Start mitmproxy interceptor (captures ChatGPT) |
-| `onememory status` | Show memory stats |
-| `onememory recent` | Show recently captured conversations |
-| `onememory search "query"` | Search your memories |
-| `onememory remember "text" --category identity` | Manually store a memory |
-| `onememory dream` | Consolidate conversations into structured memories |
-| `onememory mcp-serve` | Start MCP server for Claude Code |
-| `onememory server` | Start REST API server (optional) |
-
-## MCP Tools (for Claude)
-
-| Tool | What it does |
-|------|-------------|
-| `get_context` | Full user context — identity, preferences, knowledge |
-| `search_memory` | Search for specific memories |
-| `list_memories` | List all stored memories |
-| `remember` | Store a new memory |
-| `get_recent_conversations` | See recent captured conversations |
+You should see `[OneMemory] Captured (...)` and `[OneMemory] Auto-stored: [...]` lines when you chat on ChatGPT.
 
 ---
 
@@ -291,13 +253,11 @@ We use mitmproxy — a battle-tested HTTPS proxy — with a custom addon. This:
 - **Works with any browser** — not locked to Chrome
 - **Extensible** — add Gemini, Perplexity, etc. by matching new endpoints
 
-### Why Plain Files?
+### No Duplicates, Ever
 
-Everything is JSON in `~/.onememory/`. No SQLite, no Postgres, no vector stores.
+Memories use **content-based deterministic IDs** (`md5(content)[:12]`). Same message = same ID = ChromaDB upsert overwrites instead of duplicating. Run consolidation 100 times — still no duplicates.
 
-- Copy the folder to a USB drive. Done.
-- `cat` any file to see what's stored.
-- Git-trackable. Portable. Yours.
+### Storage
 
 ```
 ~/.onememory/
@@ -305,6 +265,7 @@ Everything is JSON in `~/.onememory/`. No SQLite, no Postgres, no vector stores.
 │   ├── 2026-02-21.json    # One file per day (all conversations)
 │   └── 2026-02-20.json
 ├── cortex/                # Consolidated memories
+│   ├── vectordb/          # ChromaDB vector store (semantic search)
 │   └── knowledge/         # Facts and knowledge
 ├── amygdala/
 │   └── salience.json      # Importance scores
@@ -326,9 +287,8 @@ Everything is JSON in `~/.onememory/`. No SQLite, no Postgres, no vector stores.
 | Component | Technology |
 |-----------|-----------|
 | Interceptor | mitmproxy + custom addon |
-| Storage | Plain JSON files |
-| API server | FastAPI + uvicorn |
-| MCP server | FastMCP |
+| Storage | Plain JSON + ChromaDB vectors |
+| MCP server | FastMCP (stdio + SSE) |
 | CLI | Typer + Rich |
 | Data models | Pydantic v2 |
 
@@ -338,18 +298,17 @@ Everything is JSON in `~/.onememory/`. No SQLite, no Postgres, no vector stores.
 
 OneMemory is a proof of concept for a bigger idea: **you should own your AI context**.
 
-Today, your preferences, your communication style, your project context — it's all locked inside platforms you don't control. OneMemory is a local-first, file-based, portable memory layer that sits between you and every AI you use.
+Today, your preferences, your communication style, your project context — it's all locked inside platforms you don't control. OneMemory is a local-first, portable memory layer that sits between you and every AI you use.
 
 ### Future Directions
 
 - **More AI platforms** — Gemini, Perplexity, Grok (add endpoint patterns to the addon)
 - **LLM consolidation** — use a local LLM for smarter memory extraction
-- **Embedding search** — local embeddings for semantic search
 - **Memory decay** — older, less-accessed memories fade over time
 - **Cross-device sync** — sync via git or Syncthing
 
 ---
 
-**Zero databases. Zero vector stores. Zero cloud services. Just files on your disk.**
+**One command. Instant memories. No duplicates. Your brain, your data.**
 
 *Built to prove that your AI memory should belong to you.*
