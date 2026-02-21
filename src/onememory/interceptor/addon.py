@@ -119,6 +119,7 @@ def _save_conversation(user_message: str, assistant_message: str, model: str) ->
         "model": model or "chatgpt",
         "messages": [],
         "timestamp": now.isoformat(),
+        "metadata": {"agent": "chatgpt", "source": "chatgpt-web", "provider": "openai"},
     }
     if user_message:
         conversation["messages"].append({"role": "user", "content": user_message})

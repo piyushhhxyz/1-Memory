@@ -126,9 +126,27 @@ def recent(limit: int = 10):
         assistant_msgs = [m for m in c.messages if m.role == "assistant"]
         user_text = user_msgs[0].content[:80] if user_msgs else "(no user message)"
         assistant_text = assistant_msgs[0].content[:80] if assistant_msgs else ""
-        console.print(f"  [cyan][{c.provider}:{c.model}][/cyan] {user_text}")
+        agent = c.metadata.get("agent", "unknown") if c.metadata else "unknown"
+        console.print(f"  [cyan]\\[{agent}:{c.model}][/cyan] {user_text}")
         if assistant_text:
             console.print(f"    [dim]→ {assistant_text}[/dim]")
+
+
+@app.command()
+def clear(yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation")):
+    """Clear today's captured conversations."""
+    from datetime import datetime, timezone
+    from onememory.config import Config
+    config = Config()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_file = config.hippocampus_dir / f"{today}.json"
+    if not today_file.exists():
+        console.print("[yellow]No conversations captured today.[/yellow]")
+        return
+    if not yes:
+        typer.confirm(f"This will delete today's conversations ({today}). Continue?", abort=True)
+    today_file.unlink()
+    console.print(f"[green]Today's conversations cleared ({today}).[/green]")
 
 
 if __name__ == "__main__":
