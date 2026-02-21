@@ -1,3 +1,4 @@
+"""Cortex — long-term semantic memory storage, like the brain's neocortex."""
 from __future__ import annotations
 from onememory.config import Config
 from onememory.models import MemoryEntry, SearchResult
@@ -5,25 +6,20 @@ from onememory.brain.repository import FileStore
 
 
 class Cortex:
+    """Stores and searches consolidated memories."""
+
     def __init__(self, config: Config) -> None:
         self.config = config
         self.store = FileStore()
 
     def store_memory(self, entry: MemoryEntry) -> str:
-        if entry.category in ("identity", "preference", "preferences"):
+        if entry.category in ("identity", "preference"):
             directory = self.config.cortex_dir
         else:
             directory = self.config.cortex_dir / "knowledge"
         filepath = directory / f"{entry.id}.json"
         self.store.save(filepath, entry)
         return entry.id
-
-    def get(self, memory_id: str) -> MemoryEntry | None:
-        for pattern in ["*.json", "knowledge/*.json"]:
-            for f in self.config.cortex_dir.glob(pattern):
-                if f.stem == memory_id:
-                    return MemoryEntry.model_validate_json(f.read_text())
-        return None
 
     def get_all(self) -> list[MemoryEntry]:
         results = []
@@ -40,6 +36,7 @@ class Cortex:
         return results
 
     def search(self, query: str, limit: int = 10) -> list[SearchResult]:
+        """Token-overlap search: score = matching_terms / query_terms * importance."""
         query_tokens = set(query.lower().split())
         if not query_tokens:
             return []

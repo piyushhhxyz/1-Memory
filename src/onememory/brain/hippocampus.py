@@ -1,3 +1,4 @@
+"""Hippocampus — fast episodic memory capture, like the brain's hippocampus."""
 from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,6 +8,8 @@ from onememory.brain.repository import FileStore
 
 
 class Hippocampus:
+    """Captures and indexes raw conversations."""
+
     def __init__(self, config: Config) -> None:
         self.config = config
         self.store = FileStore()
@@ -60,19 +63,16 @@ class Hippocampus:
         return results
 
     def get_all_today(self) -> list[Conversation]:
-        today_dir = self._today_dir()
         results = []
-        for f in sorted(today_dir.glob("*.json")):
+        for f in sorted(self._today_dir().glob("*.json")):
             try:
                 results.append(Conversation.model_validate_json(f.read_text()))
             except Exception:
                 pass
         return results
 
-    def get_pending(self) -> list[Conversation]:
-        return self.get_all_today()
-
     def on_capture(self, callback) -> None:
+        """Observer pattern — register a callback for new captures."""
         self._on_capture_callbacks.append(callback)
 
     def count(self) -> int:

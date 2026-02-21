@@ -1,3 +1,4 @@
+"""OneMemory data models."""
 from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -41,4 +42,4 @@ class SearchResult(BaseModel):
 
 
 class HippocampusIndex(BaseModel):
-    conversations: dict[str, str] = Field(default_factory=dict)  # id -> filepath
+    conversations: dict[str, str] = Field(default_factory=dict)

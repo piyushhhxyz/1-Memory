@@ -1,6 +1,5 @@
-import os
+"""OneMemory CLI — one command to rule them all."""
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -16,7 +15,7 @@ ADDON_PATH = Path(__file__).parent / "interceptor" / "addon.py"
 
 @app.command()
 def init():
-    """Initialize OneMemory directory structure."""
+    """Initialize the ~/.onememory/ directory structure."""
     from onememory.config import Config
     config = Config()
     config.ensure_dirs()
@@ -25,31 +24,22 @@ def init():
 
 @app.command()
 def start(port: int = 8080):
-    """Start the mitmproxy interceptor — captures ChatGPT traffic."""
+    """Start the mitmproxy interceptor — captures ChatGPT conversations."""
     console.print(Panel(
         f"[bold green]OneMemory Interceptor starting on port {port}[/bold green]\n\n"
-        f"[yellow]Step 1:[/yellow] Configure your browser/system proxy to [cyan]localhost:{port}[/cyan]\n"
-        f"[yellow]Step 2:[/yellow] Install the mitmproxy CA cert (one time):\n"
-        f"         Open [cyan]http://mitm.it[/cyan] in your browser after starting\n"
-        f"[yellow]Step 3:[/yellow] Chat on [cyan]chatgpt.com[/cyan] — conversations auto-captured\n",
+        f"[yellow]1.[/yellow] Set system proxy to [cyan]localhost:{port}[/cyan]\n"
+        f"[yellow]2.[/yellow] Install CA cert (one time): open [cyan]http://mitm.it[/cyan]\n"
+        f"[yellow]3.[/yellow] Chat on [cyan]chatgpt.com[/cyan] — conversations auto-captured",
         title="OneMemory"
     ))
-    # Run mitmdump with our addon
-    subprocess.run(
-        ["mitmdump", "-p", str(port), "-s", str(ADDON_PATH)],
-    )
+    subprocess.run(["mitmdump", "-p", str(port), "-s", str(ADDON_PATH), "--quiet"])
 
 
 @app.command()
 def server(port: int = 11411):
-    """Start the OneMemory API server (for search, status, etc.)."""
+    """Start the REST API server (optional, for dashboards/scripts)."""
     import uvicorn
-    console.print(Panel(
-        f"[bold green]OneMemory API server on port {port}[/bold green]\n"
-        f"  Health: [cyan]http://localhost:{port}/health[/cyan]\n"
-        f"  Memories: [cyan]http://localhost:{port}/api/memories[/cyan]",
-        title="OneMemory"
-    ))
+    console.print(f"[green]OneMemory API server on port {port}[/green]")
     uvicorn.run("onememory.interceptor.proxy:app", host="0.0.0.0", port=port, log_level="info")
 
 
@@ -62,7 +52,7 @@ def mcp_serve():
 
 @app.command()
 def status():
-    """Show OneMemory status."""
+    """Show memory stats."""
     from onememory.brain import create_brain
     brain = create_brain()
     s = brain.status()
@@ -90,7 +80,7 @@ def search(query: str, limit: int = 10):
 
 @app.command()
 def remember(content: str, category: str = "general", tags: str = ""):
-    """Store a new memory."""
+    """Store a new memory manually."""
     from onememory.brain import create_brain
     brain = create_brain()
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
@@ -116,14 +106,15 @@ def dream():
         console.print("[yellow]No conversations to consolidate.[/yellow]")
     else:
         console.print(Panel(
-            f"[green]Consolidated {result['conversations']} conversations into {result['memories_created']} memories[/green]",
+            f"[green]Consolidated {result['conversations']} conversations "
+            f"into {result['memories_created']} memories[/green]",
             title="Dream Complete"
         ))
 
 
 @app.command()
 def recent(limit: int = 10):
-    """Show recent captured conversations."""
+    """Show recently captured conversations."""
     from onememory.brain import create_brain
     brain = create_brain()
     convos = brain.get_recent_conversations(limit)
@@ -132,8 +123,12 @@ def recent(limit: int = 10):
         return
     for c in convos:
         user_msgs = [m for m in c.messages if m.role == "user"]
-        preview = user_msgs[0].content[:80] if user_msgs else "(no user message)"
-        console.print(f"  [{c.provider}:{c.model}] {preview}")
+        assistant_msgs = [m for m in c.messages if m.role == "assistant"]
+        user_text = user_msgs[0].content[:80] if user_msgs else "(no user message)"
+        assistant_text = assistant_msgs[0].content[:80] if assistant_msgs else ""
+        console.print(f"  [cyan][{c.provider}:{c.model}][/cyan] {user_text}")
+        if assistant_text:
+            console.print(f"    [dim]→ {assistant_text}[/dim]")
 
 
 if __name__ == "__main__":

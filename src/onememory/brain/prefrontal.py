@@ -1,3 +1,4 @@
+"""Prefrontal Cortex — the query orchestrator (Facade pattern)."""
 from __future__ import annotations
 from onememory.config import Config
 from onememory.models import Conversation, MemoryEntry, SearchResult
@@ -7,12 +8,13 @@ from onememory.brain.amygdala import Amygdala
 
 
 class PrefrontalCortex:
+    """Single entry point for all memory operations."""
+
     def __init__(self, config: Config, hippocampus: Hippocampus, cortex: Cortex, amygdala: Amygdala) -> None:
         self.config = config
         self.hippocampus = hippocampus
         self.cortex = cortex
         self.amygdala = amygdala
-        # Wire up observer: score conversations on capture
         self.hippocampus.on_capture(self.amygdala.score)
 
     def capture(self, conversation: Conversation) -> str:
@@ -32,8 +34,8 @@ class PrefrontalCortex:
         memories = self.cortex.get_all()
         recent = self.hippocampus.get_recent(5)
         identity = [m for m in memories if m.category == "identity"]
-        preferences = [m for m in memories if m.category in ("preference", "preferences")]
-        knowledge = [m for m in memories if m.category not in ("identity", "preference", "preferences")]
+        preferences = [m for m in memories if m.category == "preference"]
+        knowledge = [m for m in memories if m.category not in ("identity", "preference")]
         return {
             "identity": [m.content for m in identity],
             "preferences": [m.content for m in preferences],
