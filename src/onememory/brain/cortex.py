@@ -1,59 +1,102 @@
-"""Cortex — long-term semantic memory storage, like the brain's neocortex."""
+"""Cortex — long-term semantic memory storage using chromadb vector search."""
 from __future__ import annotations
+import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+import chromadb
 from onememory.config import Config
 from onememory.models import MemoryEntry, SearchResult
-from onememory.brain.repository import FileStore
 
 
 class Cortex:
-    """Stores and searches consolidated memories."""
+    """Stores and searches consolidated memories using vector embeddings."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self.store = FileStore()
+        self._client = chromadb.PersistentClient(
+            path=str(config.cortex_dir / "vectordb")
+        )
+        self._collection = self._client.get_or_create_collection(
+            "memories",
+            metadata={"hnsw:space": "cosine"},
+        )
 
     def store_memory(self, entry: MemoryEntry) -> str:
-        if entry.category in ("identity", "preference"):
-            directory = self.config.cortex_dir
-        else:
-            directory = self.config.cortex_dir / "knowledge"
-        filepath = directory / f"{entry.id}.json"
-        self.store.save(filepath, entry)
+        self._collection.upsert(
+            ids=[entry.id],
+            documents=[entry.content],
+            metadatas=[{
+                "category": entry.category,
+                "source": entry.source,
+                "tags": ",".join(entry.tags),
+                "importance": entry.importance,
+                "timestamp": entry.timestamp,
+            }],
+        )
         return entry.id
 
-    def get_all(self) -> list[MemoryEntry]:
+    def search(self, query: str, limit: int = 10) -> list[SearchResult]:
+        """Semantic vector search via chromadb."""
+        count = self._collection.count()
+        if count == 0:
+            return []
+        result = self._collection.query(
+            query_texts=[query],
+            n_results=min(limit, count),
+        )
         results = []
-        for f in self.store.list_files(self.config.cortex_dir, "*.json"):
-            try:
-                results.append(MemoryEntry.model_validate_json(f.read_text()))
-            except Exception:
-                pass
-        for f in self.store.list_files(self.config.cortex_dir / "knowledge", "*.json"):
-            try:
-                results.append(MemoryEntry.model_validate_json(f.read_text()))
-            except Exception:
-                pass
+        for i, doc_id in enumerate(result["ids"][0]):
+            meta = result["metadatas"][0][i]
+            distance = result["distances"][0][i] if result.get("distances") else 0
+            score = max(0.0, 1.0 - distance)
+            entry = MemoryEntry(
+                id=doc_id,
+                content=result["documents"][0][i],
+                category=meta.get("category", "general"),
+                source=meta.get("source", ""),
+                tags=meta.get("tags", "").split(",") if meta.get("tags") else [],
+                importance=meta.get("importance", 0.5),
+                timestamp=meta.get("timestamp", ""),
+            )
+            results.append(SearchResult(entry=entry, score=round(score, 2)))
         return results
 
-    def search(self, query: str, limit: int = 10) -> list[SearchResult]:
-        """Token-overlap search: score = matching_terms / query_terms * importance."""
-        query_tokens = set(query.lower().split())
-        if not query_tokens:
+    def get_all(self) -> list[MemoryEntry]:
+        count = self._collection.count()
+        if count == 0:
             return []
-        results = []
-        for entry in self.get_all():
-            content_tokens = set(entry.content.lower().split())
-            tag_tokens = {t.lower() for t in entry.tags}
-            all_tokens = content_tokens | tag_tokens | {entry.category.lower()}
-            overlap = query_tokens & all_tokens
-            if overlap:
-                score = len(overlap) / len(query_tokens) * entry.importance
-                results.append(SearchResult(entry=entry, score=score))
-        results.sort(key=lambda r: r.score, reverse=True)
-        return results[:limit]
+        result = self._collection.get()
+        entries = []
+        for i, doc_id in enumerate(result["ids"]):
+            meta = result["metadatas"][i]
+            entries.append(MemoryEntry(
+                id=doc_id,
+                content=result["documents"][i],
+                category=meta.get("category", "general"),
+                source=meta.get("source", ""),
+                tags=meta.get("tags", "").split(",") if meta.get("tags") else [],
+                importance=meta.get("importance", 0.5),
+                timestamp=meta.get("timestamp", ""),
+            ))
+        return entries
 
     def get_by_category(self, category: str) -> list[MemoryEntry]:
-        return [e for e in self.get_all() if e.category == category]
+        count = self._collection.count()
+        if count == 0:
+            return []
+        result = self._collection.get(where={"category": category})
+        entries = []
+        for i, doc_id in enumerate(result["ids"]):
+            meta = result["metadatas"][i]
+            entries.append(MemoryEntry(
+                id=doc_id,
+                content=result["documents"][i],
+                category=meta.get("category", "general"),
+                source=meta.get("source", ""),
+                tags=meta.get("tags", "").split(",") if meta.get("tags") else [],
+                importance=meta.get("importance", 0.5),
+                timestamp=meta.get("timestamp", ""),
+            ))
+        return entries
 
     def count(self) -> int:
-        return len(self.get_all())
+        return self._collection.count()
