@@ -12,16 +12,28 @@ class Cortex:
 
     def __init__(self, config: Config) -> None:
         self.config = config
-        self._client = chromadb.PersistentClient(
-            path=str(config.cortex_dir / "vectordb")
-        )
+        self._db_path = config.cortex_dir / "vectordb"
+        self._client = None
+        self._collection = None
+
+    def _get_collection(self):
+        """Lazy init — recreates client/collection if vectordb was deleted."""
+        if self._collection is not None:
+            try:
+                self._collection.count()
+                return self._collection
+            except Exception:
+                self._client = None
+                self._collection = None
+        self._client = chromadb.PersistentClient(path=str(self._db_path))
         self._collection = self._client.get_or_create_collection(
             "memories",
             metadata={"hnsw:space": "cosine"},
         )
+        return self._collection
 
     def store_memory(self, entry: MemoryEntry) -> str:
-        self._collection.upsert(
+        self._get_collection().upsert(
             ids=[entry.id],
             documents=[entry.content],
             metadatas=[{
@@ -36,10 +48,11 @@ class Cortex:
 
     def search(self, query: str, limit: int = 10) -> list[SearchResult]:
         """Semantic vector search via chromadb."""
-        count = self._collection.count()
+        collection = self._get_collection()
+        count = collection.count()
         if count == 0:
             return []
-        result = self._collection.query(
+        result = collection.query(
             query_texts=[query],
             n_results=min(limit, count),
         )
@@ -61,10 +74,11 @@ class Cortex:
         return results
 
     def get_all(self) -> list[MemoryEntry]:
-        count = self._collection.count()
+        collection = self._get_collection()
+        count = collection.count()
         if count == 0:
             return []
-        result = self._collection.get()
+        result = collection.get()
         entries = []
         for i, doc_id in enumerate(result["ids"]):
             meta = result["metadatas"][i]
@@ -80,10 +94,11 @@ class Cortex:
         return entries
 
     def get_by_category(self, category: str) -> list[MemoryEntry]:
-        count = self._collection.count()
+        collection = self._get_collection()
+        count = collection.count()
         if count == 0:
             return []
-        result = self._collection.get(where={"category": category})
+        result = collection.get(where={"category": category})
         entries = []
         for i, doc_id in enumerate(result["ids"]):
             meta = result["metadatas"][i]
@@ -99,4 +114,4 @@ class Cortex:
         return entries
 
     def count(self) -> int:
-        return self._collection.count()
+        return self._get_collection().count()

@@ -2,12 +2,13 @@
 Dreamer — sleep consolidation engine.
 
 Reads today's conversations from hippocampus, extracts structured facts
-using heuristics, scores them, and stores important ones in cortex.
+using heuristics, and stores them in cortex.
 
-In a full implementation this would use a local LLM (Llama, Qwen, etc.)
-for smarter extraction. For now: keyword-based heuristics.
+Uses content-based deterministic IDs so the same fact always gets the
+same ID — chromadb upsert deduplicates automatically.
 """
 from __future__ import annotations
+import hashlib
 import json
 from datetime import datetime, timezone
 from onememory.config import Config
@@ -18,6 +19,11 @@ from onememory.brain.amygdala import Amygdala
 
 IDENTITY_SIGNALS = ["my name is", "i am a", "i'm a", "i work at", "i work as", "i live in"]
 PREFERENCE_SIGNALS = ["i prefer", "i like", "i love", "i hate", "i use", "my favorite", "i always"]
+
+
+def _content_id(content: str) -> str:
+    """Deterministic ID from content — same text always gets the same ID."""
+    return hashlib.md5(content.encode()).hexdigest()[:12]
 
 
 class Dreamer:
@@ -36,11 +42,10 @@ class Dreamer:
         memories_created = 0
         for convo in conversations:
             score = self.amygdala.score(convo)
-            if score >= 0.4:
-                for fact in self._extract_facts(convo):
-                    fact.importance = score
-                    self.cortex.store_memory(fact)
-                    memories_created += 1
+            for fact in self._extract_facts(convo):
+                fact.importance = score
+                self.cortex.store_memory(fact)
+                memories_created += 1
 
         log = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -52,6 +57,14 @@ class Dreamer:
         log_path.write_text(json.dumps(log, indent=2))
 
         return {"status": "done", "conversations": len(conversations), "memories_created": memories_created}
+
+    def consolidate_conversation(self, conversation: Conversation) -> int:
+        """Extract facts from a single conversation and store in cortex. Returns count of memories created."""
+        memories_created = 0
+        for fact in self._extract_facts(conversation):
+            self.cortex.store_memory(fact)
+            memories_created += 1
+        return memories_created
 
     def _extract_facts(self, conversation: Conversation) -> list[MemoryEntry]:
         facts = []
@@ -69,11 +82,11 @@ class Dreamer:
             elif any(sig in lower for sig in PREFERENCE_SIGNALS):
                 category = "preference"
 
-            if category != "knowledge" or (len(text.split()) <= 30 and not text.endswith("?")):
-                facts.append(MemoryEntry(
-                    content=text,
-                    category=category,
-                    source=f"{conversation.provider}:{conversation.model}",
-                    tags=[conversation.provider],
-                ))
+            facts.append(MemoryEntry(
+                id=_content_id(text),
+                content=text,
+                category=category,
+                source=f"{conversation.provider}:{conversation.model}",
+                tags=[conversation.provider],
+            ))
         return facts

@@ -4,6 +4,9 @@ mitmproxy addon — intercepts ChatGPT web conversations and saves to OneMemory.
 Listens for POST requests to chatgpt.com's conversation endpoint,
 parses the v1 delta-encoded SSE response, and saves both user message
 and assistant reply to ~/.onememory/hippocampus/.
+
+After saving, immediately extracts facts and stores them in cortex
+(auto-consolidation — no manual dream needed).
 """
 from __future__ import annotations
 import json
@@ -116,6 +119,7 @@ def _save_conversation(user_message: str, assistant_message: str, model: str) ->
 
     conversation = {
         "id": conv_id,
+        "provider": "openai",
         "model": model or "chatgpt",
         "messages": [],
         "timestamp": now.isoformat(),
@@ -161,7 +165,53 @@ class OneMemoryAddon:
         HIPPOCAMPUS_DIR.mkdir(parents=True, exist_ok=True)
         (ONEMEMORY_DIR / "cortex" / "knowledge").mkdir(parents=True, exist_ok=True)
         (ONEMEMORY_DIR / "amygdala").mkdir(parents=True, exist_ok=True)
+
+        # Init brain for auto-consolidation
+        try:
+            from onememory.config import Config
+            from onememory.brain.cortex import Cortex
+            from onememory.consolidation.dreamer import Dreamer, _content_id
+            config = Config()
+            config.ensure_dirs()
+            self._cortex = Cortex(config)
+            self._content_id = _content_id
+            print("[OneMemory] Auto-consolidation enabled")
+        except Exception as e:
+            self._cortex = None
+            print(f"[OneMemory] Auto-consolidation disabled: {e}")
+
         print("[OneMemory] Listening for ChatGPT conversations...")
+
+    def _auto_consolidate(self, user_message: str, model: str):
+        """Extract facts from user message and store directly in cortex."""
+        if not self._cortex or not user_message:
+            return
+        text = user_message.strip()
+        if len(text) < 10:
+            return
+
+        try:
+            from onememory.models import MemoryEntry
+            from onememory.consolidation.dreamer import IDENTITY_SIGNALS, PREFERENCE_SIGNALS
+
+            lower = text.lower()
+            category = "knowledge"
+            if any(sig in lower for sig in IDENTITY_SIGNALS):
+                category = "identity"
+            elif any(sig in lower for sig in PREFERENCE_SIGNALS):
+                category = "preference"
+
+            entry = MemoryEntry(
+                id=self._content_id(text),
+                content=text,
+                category=category,
+                source=f"openai:{model or 'chatgpt'}",
+                tags=["openai"],
+            )
+            self._cortex.store_memory(entry)
+            print(f"[OneMemory] Auto-stored: [{category}] {text[:50]}...")
+        except Exception as e:
+            print(f"[OneMemory] Auto-consolidation error: {e}")
 
     def requestheaders(self, flow: http.HTTPFlow) -> None:
         """Suppress non-ChatGPT traffic from mitmproxy logs."""
@@ -202,6 +252,9 @@ class OneMemoryAddon:
             print(f"[OneMemory] Captured ({model}): {user_message[:60]}")
             print(f"[OneMemory] Reply: {assistant_message[:60]}")
             print(f"[OneMemory] Saved: {filepath}")
+
+            # Auto-consolidate: extract facts → store in cortex immediately
+            self._auto_consolidate(user_message, model)
         except Exception as e:
             print(f"[OneMemory] Error: {e}")
 
