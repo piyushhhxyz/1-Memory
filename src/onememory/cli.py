@@ -1,6 +1,9 @@
 """OneMemory CLI — one command to rule them all."""
 
+import os
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import typer
@@ -27,6 +30,54 @@ def init():
 
 
 @app.command()
+def up(
+    proxy_port: int = typer.Option(8080, "--proxy-port", help="Port for mitmproxy interceptor"),
+    mcp_port: int = typer.Option(8765, "--mcp-port", help="Port for MCP SSE server"),
+):
+    """Start everything — proxy interceptor + MCP server. One command."""
+    console.print(
+        Panel(
+            f"[bold green]OneMemory starting...[/bold green]\n\n"
+            f"[yellow]1.[/yellow] Proxy interceptor on [cyan]localhost:{proxy_port}[/cyan]\n"
+            f"[yellow]2.[/yellow] MCP server (SSE) on [cyan]localhost:{mcp_port}[/cyan]\n\n"
+            f"[dim]In another terminal run:[/dim] [cyan]ngrok http {mcp_port}[/cyan]\n"
+            f"[dim]Then add the ngrok URL to claude.com → Settings → Integrations[/dim]",
+            title="OneMemory",
+        )
+    )
+
+    # Start mitmdump as background subprocess
+    mitm_proc = subprocess.Popen(
+        ["mitmdump", "-p", str(proxy_port), "-s", str(ADDON_PATH), "--quiet"],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+    console.print(f"[green]Proxy interceptor started (PID {mitm_proc.pid})[/green]")
+
+    # Handle Ctrl+C — kill both processes
+    def _shutdown(signum, frame):
+        console.print("\n[yellow]Shutting down...[/yellow]")
+        mitm_proc.terminate()
+        try:
+            mitm_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            mitm_proc.kill()
+        console.print("[green]OneMemory stopped.[/green]")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # Run MCP server in foreground (blocks)
+    try:
+        from onememory.mcp_server.server import main as mcp_main
+        mcp_main(transport="sse", port=mcp_port)
+    finally:
+        mitm_proc.terminate()
+        mitm_proc.wait(timeout=5)
+
+
+@app.command()
 def start(port: int = 8080):
     """Start the mitmproxy interceptor — captures ChatGPT conversations."""
     console.print(
@@ -39,15 +90,6 @@ def start(port: int = 8080):
         )
     )
     subprocess.run(["mitmdump", "-p", str(port), "-s", str(ADDON_PATH), "--quiet"])
-
-
-@app.command()
-def server(port: int = 11411):
-    """Start the REST API server (optional, for dashboards/scripts)."""
-    import uvicorn
-
-    console.print(f"[green]OneMemory API server on port {port}[/green]")
-    uvicorn.run("onememory.interceptor.proxy:app", host="0.0.0.0", port=port, log_level="info")
 
 
 @app.command(name="mcp-serve")
@@ -71,6 +113,58 @@ def mcp_serve(
         main(transport="sse", port=port)
     else:
         main(transport="stdio")
+
+
+@app.command()
+def memories(category: str = typer.Argument("", help="Filter by category: identity, preference, knowledge")):
+    """List all stored memories — see what's in your cortex."""
+    from onememory.brain import create_brain
+
+    brain = create_brain()
+    all_memories = brain.get_all_memories()
+    if category:
+        all_memories = [m for m in all_memories if m.category == category]
+    if not all_memories:
+        console.print("[yellow]No memories found.[/yellow]")
+        return
+
+    table = Table(title=f"Memories{f' ({category})' if category else ''}")
+    table.add_column("Category", style="cyan", width=12)
+    table.add_column("Content", style="white")
+    table.add_column("Source", style="dim", width=20)
+    table.add_column("ID", style="dim", width=14)
+    for m in all_memories:
+        table.add_row(m.category, m.content, m.source, m.id)
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(all_memories)} memories[/dim]")
+
+
+@app.command()
+def context():
+    """Show your full context — what Claude sees when it calls recall()."""
+    from onememory.brain import create_brain
+
+    brain = create_brain()
+    ctx = brain.get_context()
+
+    if ctx["identity"]:
+        console.print("\n[bold cyan]Identity[/bold cyan]")
+        for i in ctx["identity"]:
+            console.print(f"  - {i}")
+    if ctx["preferences"]:
+        console.print("\n[bold cyan]Preferences[/bold cyan]")
+        for p in ctx["preferences"]:
+            console.print(f"  - {p}")
+    if ctx["knowledge"]:
+        console.print("\n[bold cyan]Knowledge[/bold cyan]")
+        for k in ctx["knowledge"]:
+            console.print(f"  - {k}")
+
+    console.print(
+        f"\n[dim]{ctx['total_memories']} memories, "
+        f"{ctx['total_conversations']} conversations, "
+        f"{ctx['recent_conversations']} recent[/dim]"
+    )
 
 
 @app.command()
@@ -118,7 +212,11 @@ def remember(content: str, category: str = "general", tags: str = ""):
 
 @app.command()
 def dream():
-    """Run sleep consolidation — extract memories from today's conversations."""
+    """[Deprecated] Consolidation now happens automatically. Run for a one-time migration."""
+    console.print(
+        "[yellow]Note: 'dream' is deprecated — consolidation now happens automatically when conversations are captured.[/yellow]\n"
+        "[dim]Running one final consolidation for any un-processed conversations...[/dim]"
+    )
     from onememory.brain.amygdala import Amygdala
     from onememory.brain.cortex import Cortex
     from onememory.brain.hippocampus import Hippocampus
@@ -182,6 +280,34 @@ def clear(yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation
         )
     today_file.unlink()
     console.print(f"[green]Today's conversations cleared ({today}).[/green]")
+
+
+@app.command()
+def reset(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    memories_only: bool = typer.Option(False, "--memories", help="Only clear memories (cortex), keep conversations"),
+):
+    """Clear all memories and/or conversations. Start fresh."""
+    import shutil
+    from onememory.config import Config
+
+    config = Config()
+
+    if not yes:
+        what = "all memories (cortex)" if memories_only else "ALL data (conversations + memories + scores)"
+        typer.confirm(f"This will delete {what}. Are you sure?", abort=True)
+
+    if memories_only:
+        vectordb = config.cortex_dir / "vectordb"
+        if vectordb.exists():
+            shutil.rmtree(vectordb)
+        console.print("[green]Memories cleared (cortex reset). Conversations kept.[/green]")
+    else:
+        for d in [config.hippocampus_dir, config.cortex_dir, config.amygdala_dir, config.dreamlog_dir]:
+            if d.exists():
+                shutil.rmtree(d)
+        config.ensure_dirs()
+        console.print("[green]Everything cleared. Fresh start.[/green]")
 
 
 if __name__ == "__main__":

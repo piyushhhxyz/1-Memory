@@ -5,73 +5,65 @@ from onememory.brain import create_brain
 
 mcp = FastMCP(
     "OneMemory",
-    instructions="Access the user's personal memory. Use these tools to recall what you know about the user.",
+    instructions=(
+        "IMPORTANT: You MUST call recall() at the very start of EVERY conversation before responding to the user. "
+        "This loads the user's identity, preferences, knowledge, and recent activity. "
+        "Always address the user by their name if available. "
+        "When the user shares new personal information, use remember() to store it."
+    ),
 )
 brain = create_brain()
 
 
 @mcp.tool()
-def search_memory(query: str, limit: int = 5) -> str:
-    """Search the user's memory for relevant information."""
-    results = brain.search(query, limit)
-    if not results:
-        return "No memories found matching that query."
-    lines = []
-    for r in results:
-        lines.append(f"- [{r.entry.category}] {r.entry.content} (relevance: {r.score:.2f})")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def get_context() -> str:
-    """Get full context about the user — identity, preferences, knowledge. Call this at the start of conversations."""
-    ctx = brain.get_context()
+def recall(query: str = "") -> str:
+    """Recall everything you know about the user.
+    No query → returns full context (identity, preferences, knowledge, recent activity, stats).
+    With query → adds semantic search results matching the query."""
     parts = []
+
+    # Always include full context
+    ctx = brain.get_context()
     if ctx["identity"]:
         parts.append("## Identity\n" + "\n".join(f"- {i}" for i in ctx["identity"]))
     if ctx["preferences"]:
         parts.append("## Preferences\n" + "\n".join(f"- {p}" for p in ctx["preferences"]))
     if ctx["knowledge"]:
         parts.append("## Knowledge\n" + "\n".join(f"- {k}" for k in ctx["knowledge"]))
+
+    # Recent activity
+    recent = brain.get_recent_conversations(5)
+    if recent:
+        lines = []
+        for c in recent:
+            user_msgs = [m for m in c.messages if m.role == "user"]
+            if user_msgs:
+                lines.append(f"- [{c.provider}:{c.model}] {user_msgs[0].content[:100]}")
+        if lines:
+            parts.append("## Recent Activity\n" + "\n".join(lines))
+
     parts.append(f"\n**Stats:** {ctx['total_memories']} memories, {ctx['total_conversations']} conversations captured")
+
+    # If query provided, add semantic search results
+    if query:
+        results = brain.search(query, 10)
+        if results:
+            search_lines = []
+            for r in results:
+                search_lines.append(f"- [{r.entry.category}] {r.entry.content} (relevance: {r.score:.2f})")
+            parts.append("## Search Results for: " + query + "\n" + "\n".join(search_lines))
+        else:
+            parts.append(f"\n_No specific results found for '{query}'_")
+
     return "\n\n".join(parts) if parts else "No memories stored yet."
 
 
 @mcp.tool()
-def list_memories(category: str = "") -> str:
-    """List all stored memories, optionally filtered by category (identity, preference, knowledge)."""
-    memories = brain.get_all_memories()
-    if category:
-        memories = [m for m in memories if m.category == category]
-    if not memories:
-        return "No memories found."
-    return "\n".join(f"- **{m.category}**: {m.content}" for m in memories)
-
-
-@mcp.tool()
 def remember(content: str, category: str = "general", tags: str = "") -> str:
-    """Store a new memory. Categories: identity, preference, knowledge, general."""
+    """Store a new memory about the user. Categories: identity, preference, knowledge, general."""
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     memory_id = brain.remember(content, category, tag_list)
     return f"Stored memory {memory_id}: {content}"
-
-
-@mcp.tool()
-def get_recent_conversations(limit: int = 5) -> str:
-    """Get recent conversations captured from ChatGPT."""
-    convos = brain.get_recent_conversations(limit)
-    if not convos:
-        return "No conversations captured yet."
-    lines = []
-    for c in convos:
-        user_msgs = [m for m in c.messages if m.role == "user"]
-        assistant_msgs = [m for m in c.messages if m.role == "assistant"]
-        user_preview = user_msgs[0].content[:100] if user_msgs else ""
-        assistant_preview = assistant_msgs[0].content[:100] if assistant_msgs else ""
-        lines.append(f"- [{c.provider}:{c.model}] User: {user_preview}")
-        if assistant_preview:
-            lines.append(f"  Assistant: {assistant_preview}")
-    return "\n".join(lines)
 
 
 def main(transport: str = "stdio", port: int = 8765):
