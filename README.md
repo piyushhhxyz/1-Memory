@@ -2,6 +2,8 @@
 
 **One memory for all your AIs.**
 
+> Sample PR note: OneMemory keeps AI context portable across tools.
+
 You tell ChatGPT your name, your preferences, what you're working on. Then you open Claude — blank slate. Switch to Gemini — blank slate. Every AI has amnesia. Your context, your identity, scattered across a dozen apps that will never talk to each other.
 
 OneMemory fixes this. It intercepts your ChatGPT conversations at the network level, **automatically** consolidates them into structured memories, and serves them to Claude via MCP. **Your brain, portable across every AI.**
