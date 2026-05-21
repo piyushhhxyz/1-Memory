@@ -312,3 +312,9 @@ Today, your preferences, your communication style, your project context — it's
 **One command. Instant memories. No duplicates. Your brain, your data.**
 
 *Built to prove that your AI memory should belong to you.*
+
+---
+
+## License
+
+This project is open source. See the repository for license details.
