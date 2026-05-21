@@ -312,3 +312,9 @@ Today, your preferences, your communication style, your project context — it's
 **One command. Instant memories. No duplicates. Your brain, your data.**
 
 *Built to prove that your AI memory should belong to you.*
+
+---
+
+## Contributing
+
+Contributions are welcome! If you have ideas for new features, bug fixes, or improvements, feel free to open an issue or submit a pull request.
